@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -134,13 +134,16 @@ export default function Page() {
   const [propKey, setPropKey] = useState("eid")
   const [result, setResult] = useState<string | number | boolean | null | undefined>(undefined)
   const [message, setMessage] = useState<string>("")
-  const [isSearching, setIsSearching] = useState(false)
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const keyInputRef = useRef<HTMLInputElement | null>(null)
 
-  const onSearch = useCallback(() => {
-    setIsSearching(true)
+  // Automatically compute result whenever raw or propKey changes
+  useEffect(() => {
     setMessage("")
+    if (!raw.trim()) {
+      setResult(undefined)
+      return
+    }
     try {
       const value = extractValue(raw, propKey.trim())
       setResult(value)
@@ -153,18 +156,8 @@ export default function Page() {
       console.log("[v0] Error during search:", (e as Error).message)
       setMessage("An error occurred while searching.")
       setResult(undefined)
-    } finally {
-      setIsSearching(false)
     }
   }, [raw, propKey])
-
-  const onSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault()
-      onSearch()
-    },
-    [onSearch],
-  )
 
   const onPaste = useCallback(async () => {
     try {
@@ -189,16 +182,6 @@ export default function Page() {
     textAreaRef.current?.focus()
   }, [])
 
-  const onTextareaKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        onSearch()
-      }
-    },
-    [onSearch],
-  )
-
   const display = useMemo(() => {
     if (result === undefined) return null
     if (typeof result === "string") return result
@@ -212,7 +195,7 @@ export default function Page() {
       <header className="mb-6">
         <h1 className="text-pretty text-2xl font-semibold">Property Value Finder</h1>
         <p className="mt-1 text-muted-foreground">
-          Use Cmd/Ctrl+Enter in the textarea to search.
+          Results are computed automatically as you type.
         </p>
       </header>
 
@@ -226,7 +209,7 @@ export default function Page() {
         )}
       </section>
 
-      <form onSubmit={onSubmit} className="space-y-6">
+      <div className="space-y-6">
         <section className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_auto]">
           <div className="space-y-2">
             <Label htmlFor="prop-key" className="text-sm font-medium">
@@ -254,9 +237,6 @@ export default function Page() {
               <Button type="button" variant="destructive" size="sm" onClick={onClear} aria-label="Clear input">
                 Clear
               </Button>
-              <Button type="submit" className="sm:self-end" disabled={isSearching} aria-label="Search">
-                {isSearching ? "Searching…" : "Search"}
-              </Button>
             </div>
           </div>
           <Textarea
@@ -264,16 +244,15 @@ export default function Page() {
             ref={textAreaRef}
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
-            onKeyDown={onTextareaKeyDown}
             placeholder="Paste your long string here..."
             className="min-h-48"
             aria-describedby="long-input-hint"
           />
           <p id="long-input-hint" className="text-xs text-muted-foreground">
-            Tip: Press Cmd/Ctrl+Enter to search while editing the textarea.
+            Paste your data and the result will appear automatically.
           </p>
         </section>
-      </form>
+      </div>
     </main>
   )
 }
