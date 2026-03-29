@@ -3,6 +3,8 @@
 import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTheme } from "next-themes"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -129,25 +131,45 @@ function extractValue(input: string, key: string): string | number | boolean | n
   return undefined
 }
 
+function extractAllValues(input: string, key: string): string[] {
+  if (!key.trim() || !input.trim()) return []
+  const keyRe = escapeRegExp(key)
+  const re = new RegExp(`"${keyRe}"\\s*:\\s*(?:"([^"]*)"|([-\\d.]+)|(true|false)|null)`, "gi")
+  const results: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(input)) !== null) {
+    const val = m[1] ?? m[2] ?? m[3] ?? "null"
+    if (val && !results.includes(val)) {
+      results.push(val)
+    }
+  }
+  return results
+}
+
 export default function Page() {
   const [raw, setRaw] = useState("")
   const [propKey, setPropKey] = useState("eid")
   const [result, setResult] = useState<string | number | boolean | null | undefined>(undefined)
+  const [allMatches, setAllMatches] = useState<string[]>([])
   const [message, setMessage] = useState<string>("")
+  const { theme, setTheme } = useTheme()
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const keyInputRef = useRef<HTMLInputElement | null>(null)
 
-  // Automatically compute result whenever raw or propKey changes
   useEffect(() => {
     setMessage("")
     if (!raw.trim()) {
       setResult(undefined)
+      setAllMatches([])
       return
     }
     try {
+      const matches = extractAllValues(raw, propKey.trim())
+      setAllMatches(matches)
+
       const value = extractValue(raw, propKey.trim())
       setResult(value)
-      if (value === undefined) {
+      if (matches.length === 0 && value === undefined) {
         setMessage("No match found.")
       } else {
         setMessage("")
@@ -156,8 +178,18 @@ export default function Page() {
       console.log("[v0] Error during search:", (e as Error).message)
       setMessage("An error occurred while searching.")
       setResult(undefined)
+      setAllMatches([])
     }
   }, [raw, propKey])
+
+  const copyToClipboard = useCallback(async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success("Copied to clipboard", { description: value })
+    } catch {
+      toast.error("Failed to copy to clipboard")
+    }
+  }, [])
 
   const onPaste = useCallback(async () => {
     try {
@@ -178,6 +210,7 @@ export default function Page() {
   const onClear = useCallback(() => {
     setRaw("")
     setResult(undefined)
+    setAllMatches([])
     setMessage("Cleared.")
     textAreaRef.current?.focus()
   }, [])
@@ -192,17 +225,55 @@ export default function Page() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
-      <header className="mb-6">
-        <h1 className="text-pretty text-2xl font-semibold">Property Value Finder</h1>
-        <p className="mt-1 text-muted-foreground">
-          Results are computed automatically as you type.
-        </p>
+      <header className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-pretty text-2xl font-semibold">Property Value Finder</h1>
+          <p className="mt-1 text-muted-foreground">
+            Results are computed automatically as you type.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          aria-label="Toggle theme"
+          className="shrink-0"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="block dark:hidden"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="hidden dark:block"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </Button>
       </header>
 
     <section className="mb-6">
         {message && <p className="text-sm text-muted-foreground">{message}</p>}
 
-        {display !== null && display !== "" && (
+        {allMatches.length > 0 && (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm font-medium text-muted-foreground">
+              Found {allMatches.length} {propKey}{allMatches.length > 1 ? "s" : ""} — click to copy
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {allMatches.map((val, idx) => (
+                <button
+                  key={`${val}-${idx}`}
+                  type="button"
+                  onClick={() => copyToClipboard(val)}
+                  className={cn(
+                    "rounded-md border px-3 py-1.5 text-sm font-mono transition-colors cursor-pointer",
+                    "hover:bg-primary hover:text-primary-foreground",
+                    "bg-card"
+                  )}
+                  aria-label={`Copy ${propKey}: ${val}`}
+                >
+                  {val}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {allMatches.length === 0 && display !== null && display !== "" && (
           <div className={cn("mt-3 rounded-md border bg-card p-4")}>
             <p className="text-xl font-bold">{display}</p>
           </div>
