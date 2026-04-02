@@ -3,13 +3,29 @@
 import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useTheme } from "next-themes"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { themes, getTheme, DEFAULT_THEME, type ThemeConfig } from "@/lib/themes"
+
+const darkThemes: ThemeConfig[] = themes.filter((t) =>
+  ["midnight", "obsidian", "ember", "aurora", "velvet", "cobalt"].includes(t.name)
+)
+const lightThemes: ThemeConfig[] = themes.filter((t) =>
+  ["ivory", "sand", "arctic", "rose"].includes(t.name)
+)
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray
 type JsonObject = { [key: string]: JsonValue }
@@ -60,23 +76,19 @@ function decodeMaybe(s: string) {
 }
 
 function searchUrlLike(input: string, key: string): string | undefined {
-  // Try full URL
   try {
     const u = new URL(input.trim())
     const val = u.searchParams.get(key)
     if (val !== null) return decodeMaybe(val)
   } catch {
-    // Not a full URL, proceed
+    // Not a full URL
   }
 
-  // Try treating as raw query string
   const raw = input.trim().replace(/^[?#]/, "")
   const qs = new URLSearchParams(raw)
   const val = qs.get(key)
   if (val !== null) return decodeMaybe(val)
 
-  // Try splitting on common delimiters (&,;,, whitespace)
-  // Matches key=value or key:value
   const re = new RegExp(`(?:^|[?&;,\\s])${escapeRegExp(key)}\\s*(?:=|:)\\s*("([^"]+)"|'([^']+)'|([^\\s&;,]+))`, "i")
   const m = raw.match(re)
   if (m) {
@@ -87,7 +99,6 @@ function searchUrlLike(input: string, key: string): string | undefined {
 }
 
 function searchJsonLike(input: string, key: string): string | number | boolean | null | undefined {
-  // Try strict JSON first
   const parsed = tryParseJson(input)
   if (parsed !== undefined) {
     const val = key.includes(".")
@@ -98,7 +109,6 @@ function searchJsonLike(input: string, key: string): string | number | boolean |
     if (val !== undefined && typeof val !== "object") return val as string | number | boolean | null
   }
 
-  // Try JSON-ish regex for "key": "value" | number | true/false | null
   const keyRe = escapeRegExp(key)
   const jsonishRe = new RegExp(`"${keyRe}"\\s*:\\s*(?:"([^"]+)"|'([^']+)'|([\\-\\d.]+)|(true|false)|null)`, "i")
   const m = input.match(jsonishRe)
@@ -115,19 +125,13 @@ function searchJsonLike(input: string, key: string): string | number | boolean |
 
 function extractValue(input: string, key: string): string | number | boolean | null | undefined {
   if (!key.trim()) return undefined
-  // 1) JSON and dot-paths
   const j = searchJsonLike(input, key)
   if (j !== undefined) return j
-
-  // 2) URL / query-like patterns
   const u = searchUrlLike(input, key)
   if (u !== undefined) return u
-
-  // 3) Generic key:value or key=value anywhere
   const generic = new RegExp(`(?:^|[\\s,;|])${escapeRegExp(key)}\\s*(?:=|:)\\s*("([^"]+)"|'([^']+)'|([^\\s,;|]+))`, "i")
   const m = input.match(generic)
   if (m) return m[2] || m[3] || m[4]
-
   return undefined
 }
 
@@ -146,15 +150,36 @@ function extractAllValues(input: string, key: string): string[] {
   return results
 }
 
+const THEME_STORAGE_KEY = "kf-theme"
+
 export default function Page() {
   const [raw, setRaw] = useState("")
   const [propKey, setPropKey] = useState("eid")
   const [result, setResult] = useState<string | number | boolean | null | undefined>(undefined)
   const [allMatches, setAllMatches] = useState<string[]>([])
   const [message, setMessage] = useState<string>("")
-  const { theme, setTheme } = useTheme()
+  const [currentTheme, setCurrentTheme] = useState(DEFAULT_THEME)
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const keyInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Load saved theme on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY)
+    if (saved && themes.some((t) => t.name === saved)) {
+      setCurrentTheme(saved)
+    }
+  }, [])
+
+  // Apply theme CSS variables + gradient to <html>
+  useEffect(() => {
+    const theme = getTheme(currentTheme)
+    const root = document.documentElement
+    for (const [prop, value] of Object.entries(theme.vars)) {
+      root.style.setProperty(prop, value)
+    }
+    document.body.style.backgroundImage = theme.gradient ?? "none"
+    localStorage.setItem(THEME_STORAGE_KEY, currentTheme)
+  }, [currentTheme])
 
   useEffect(() => {
     setMessage("")
@@ -224,64 +249,100 @@ export default function Page() {
   }, [result])
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8">
-      <header className="mb-6 flex items-start justify-between">
-        <div>
-          <h1 className="text-pretty text-2xl font-semibold">Property Value Finder</h1>
-          <p className="mt-1 text-muted-foreground">
-            Results are computed automatically as you type.
-          </p>
+    <main className="flex h-dvh overflow-hidden">
+      {/* ── Left panel: Data input ── */}
+      <section className="flex w-1/2 flex-col border-r border-border">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <Label htmlFor="long-input" className="text-sm font-medium">
+            Enter your data
+          </Label>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          aria-label="Toggle theme"
-          className="shrink-0"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="block dark:hidden"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="hidden dark:block"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-        </Button>
-      </header>
-
-    <section className="mb-6">
-        {message && <p className="text-sm text-muted-foreground">{message}</p>}
-
-        {allMatches.length > 0 && (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              Found {allMatches.length} {propKey}{allMatches.length > 1 ? "s" : ""} — click to copy
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {allMatches.map((val, idx) => (
-                <button
-                  key={`${val}-${idx}`}
-                  type="button"
-                  onClick={() => copyToClipboard(val)}
-                  className={cn(
-                    "rounded-md border px-3 py-1.5 text-sm font-mono transition-colors cursor-pointer",
-                    "hover:bg-primary hover:text-primary-foreground",
-                    "bg-card"
-                  )}
-                  aria-label={`Copy ${propKey}: ${val}`}
-                >
-                  {val}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {allMatches.length === 0 && display !== null && display !== "" && (
-          <div className={cn("mt-3 rounded-md border bg-card p-4")}>
-            <p className="text-xl font-bold">{display}</p>
-          </div>
-        )}
+        <div className="flex-1 overflow-hidden p-4">
+          <Textarea
+            id="long-input"
+            ref={textAreaRef}
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            placeholder="Paste your long string here..."
+            className="h-full resize-none font-mono text-xs"
+            aria-describedby="long-input-hint"
+          />
+        </div>
       </section>
 
-      <div className="space-y-6">
-        <section className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_auto]">
+      {/* ── Right panel: Controls + results ── */}
+      <section className="flex w-1/2 flex-col overflow-hidden">
+        {/* Header */}
+        <header className="flex items-start justify-between border-b border-border px-6 py-4">
+          <div>
+            <h1 className="text-xl font-semibold">Property Value Finder</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Results are computed automatically as you type.
+            </p>
+          </div>
+          <Select value={currentTheme} onValueChange={setCurrentTheme}>
+            <SelectTrigger size="sm" className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Dark</SelectLabel>
+                {darkThemes.map((t) => (
+                  <SelectItem key={t.name} value={t.name}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Light</SelectLabel>
+                {lightThemes.map((t) => (
+                  <SelectItem key={t.name} value={t.name}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </header>
+
+        {/* Results area */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {message && <p className="text-sm text-muted-foreground">{message}</p>}
+
+          {allMatches.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-muted-foreground">
+                Found {allMatches.length} {propKey}{allMatches.length > 1 ? "s" : ""} — click to copy
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {allMatches.map((val, idx) => (
+                  <button
+                    key={`${val}-${idx}`}
+                    type="button"
+                    onClick={() => copyToClipboard(val)}
+                    className={cn(
+                      "rounded-md border px-3 py-1.5 text-sm font-mono transition-colors cursor-pointer",
+                      "hover:bg-primary hover:text-primary-foreground",
+                      "bg-card"
+                    )}
+                    aria-label={`Copy ${propKey}: ${val}`}
+                  >
+                    {val}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {allMatches.length === 0 && display !== null && display !== "" && (
+            <div className="rounded-md border bg-card p-4">
+              <p className="text-xl font-bold">{display}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom controls */}
+        <div className="border-t border-border px-6 py-4 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="prop-key" className="text-sm font-medium">
               Property Key
@@ -295,35 +356,28 @@ export default function Page() {
               aria-label="Property key to search"
             />
           </div>
-        </section>
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="long-input" className="text-sm font-medium">
-              Enter you data
-            </Label>
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={onPaste} aria-label="Paste from clipboard">
-                Paste
-              </Button>
-              <Button type="button" variant="destructive" size="sm" onClick={onClear} aria-label="Clear input">
-                Clear
-              </Button>
-            </div>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              className="flex-1"
+              onClick={onClear}
+              aria-label="Clear input"
+            >
+              Clear
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              className="flex-1"
+              onClick={onPaste}
+              aria-label="Clear and paste from clipboard"
+            >
+              Clear &amp; Paste
+            </Button>
           </div>
-          <Textarea
-            id="long-input"
-            ref={textAreaRef}
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            placeholder="Paste your long string here..."
-            className="min-h-48"
-            aria-describedby="long-input-hint"
-          />
-          <p id="long-input-hint" className="text-xs text-muted-foreground">
-            Paste your data and the result will appear automatically.
-          </p>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
   )
 }
